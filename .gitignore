@@ -11,6 +11,7 @@ obj/
 *.suo
 
 # OSQL data files (the database log lives here at runtime)
+/data/
 *.osql
 *.osqllog
 
