@@ -61,9 +61,9 @@ public sealed class Parser(IReadOnlyList<Token> tokens)
         do
         {
             var name = Expect(TokenType.Identifier, "a column name").Text;
-            var type = ParseDataType();
+            var (type, generated) = ParseColumnType();
             var (notNull, unique) = ParseColumnConstraints();
-            columns.Add(new ColumnDefinition(name, type, notNull, unique));
+            columns.Add(new ColumnDefinition(name, type, notNull, unique, generated));
         }
         while (Match(TokenType.Comma));
 
@@ -71,19 +71,26 @@ public sealed class Parser(IReadOnlyList<Token> tokens)
         return new CreateTableStatement(tableName, columns);
     }
 
-    private DataType ParseDataType()
+    // A column's type. SERIAL is a pseudo-type: an INTEGER the database auto-generates,
+    // so it parses to INTEGER plus a Serial generation strategy.
+    private (DataType Type, ColumnGeneration Generated) ParseColumnType()
     {
         if (Match(TokenType.Integer))
         {
-            return DataType.Integer;
+            return (DataType.Integer, ColumnGeneration.None);
         }
 
         if (Match(TokenType.Text))
         {
-            return DataType.Text;
+            return (DataType.Text, ColumnGeneration.None);
         }
 
-        throw Error("a column type (INTEGER or TEXT)");
+        if (Match(TokenType.Serial))
+        {
+            return (DataType.Integer, ColumnGeneration.Serial);
+        }
+
+        throw Error("a column type (INTEGER, TEXT or SERIAL)");
     }
 
     // The optional column constraints after a type: NOT NULL, an explicit (no-op) NULL,

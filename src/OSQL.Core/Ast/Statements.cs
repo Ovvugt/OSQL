@@ -10,15 +10,27 @@ public enum DataType
     Text,
 }
 
+/// <summary>How a column's value is produced when a row doesn't supply one.</summary>
+public enum ColumnGeneration
+{
+    /// <summary>Not generated; the row supplies the value (or it stays NULL).</summary>
+    None,
+
+    /// <summary>An auto-incrementing INTEGER, declared as <c>SERIAL</c>.</summary>
+    Serial,
+}
+
 /// <summary>
 /// A column declaration inside a CREATE TABLE statement. <see cref="NotNull"/> forbids
-/// storing a NULL; <see cref="Unique"/> forbids two rows sharing the same non-NULL value.
+/// storing a NULL; <see cref="Unique"/> forbids two rows sharing the same non-NULL value;
+/// <see cref="Generated"/> says whether (and how) the database fills the value in itself.
 /// </summary>
 public sealed record ColumnDefinition(
     string Name,
     DataType Type,
     bool NotNull = false,
-    bool Unique = false);
+    bool Unique = false,
+    ColumnGeneration Generated = ColumnGeneration.None);
 
 /// <summary><c>CREATE TABLE name (col TYPE, ...)</c></summary>
 public sealed record CreateTableStatement(

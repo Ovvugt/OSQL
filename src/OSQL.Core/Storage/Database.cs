@@ -21,6 +21,7 @@ public sealed class Database : IDisposable
     private readonly BufferPool _pool;
     private readonly CommandLog _log;
     private readonly Catalog _catalog = new();
+    private readonly Dictionary<int, SequenceFile> _sequences = new(); // table id -> its SERIAL counters
     private readonly object _writeLock = new();
     private int _nextTableId = 1;
 
@@ -98,6 +99,15 @@ public sealed class Database : IDisposable
         var heap = HeapFile.Open(heapPath, _pool, new RowFormat(schema));
         var table = new Table(id, schema, heap);
         _catalog.Add(table);
+
+        var serialColumns = Enumerable.Range(0, schema.Columns.Count)
+            .Where(i => schema.Columns[i].Generated == ColumnGeneration.Serial)
+            .ToList();
+        if (serialColumns.Count > 0)
+        {
+            _sequences[id] = SequenceFile.Open(Path.Combine(_dataDirectory, $"{id}.seq"), serialColumns);
+        }
+
         return table;
     }
 
@@ -106,9 +116,11 @@ public sealed class Database : IDisposable
     private ExecutionResult ExecuteInsert(InsertStatement statement)
     {
         var table = _catalog.Get(statement.TableName);
-        var row = BuildRow(table.Schema, statement); // also enforces NOT NULL
-        EnforceUnique(table, row);                    // table scan for now; an index probe later
-        table.Heap.Insert(row);                       // buffered; reaches disk on flush or eviction
+        var row = BuildRow(table.Schema, statement);
+        ApplySerials(table, row);          // fill omitted/NULL serial columns with generated values
+        EnforceNotNull(table.Schema, row); // after generation, so a generated value satisfies it
+        EnforceUnique(table, row);         // table scan for now; an index probe later
+        table.Heap.Insert(row);            // buffered; reaches disk on flush or eviction
         return ExecutionResult.Status($"1 row inserted into '{table.Name}'.");
     }
 
@@ -131,7 +143,6 @@ public sealed class Database : IDisposable
                 values[i] = LiteralToValue(statement.Values[i]);
             }
 
-            EnforceNotNull(schema, values);
             return values;
         }
 
@@ -159,8 +170,35 @@ public sealed class Database : IDisposable
             values[IndexOfColumn(schema, name)] = LiteralToValue(statement.Values[k]);
         }
 
-        EnforceNotNull(schema, values);
         return values;
+    }
+
+    // Fill each SERIAL column: a NULL (omitted or written explicitly) gets the next generated
+    // value; an explicitly supplied value is used as-is and advances the counter past it.
+    private void ApplySerials(Table table, Value[] row)
+    {
+        if (!_sequences.TryGetValue(table.Id, out var sequences))
+        {
+            return;
+        }
+
+        var columns = table.Schema.Columns;
+        for (var i = 0; i < columns.Count; i++)
+        {
+            if (columns[i].Generated != ColumnGeneration.Serial)
+            {
+                continue;
+            }
+
+            if (row[i].IsNull)
+            {
+                row[i] = Value.Integer(sequences.Next(i));
+            }
+            else
+            {
+                sequences.Observe(i, row[i].AsInteger);
+            }
+        }
     }
 
     private static void EnforceNotNull(TableSchema schema, Value[] values)

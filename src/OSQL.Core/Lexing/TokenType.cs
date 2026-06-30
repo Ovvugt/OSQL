@@ -22,6 +22,7 @@ public enum TokenType
     Not,
     Null,
     Unique,
+    Serial,
 
     // Type keywords
     Integer,

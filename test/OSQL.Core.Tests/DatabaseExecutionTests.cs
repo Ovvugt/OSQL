@@ -243,6 +243,67 @@ public sealed class DatabaseExecutionTests
     }
 
     [Test]
+    public void Serial_GeneratesAscendingValuesWhenOmitted()
+    {
+        using var db = Database.Open(_dir);
+        db.Execute("CREATE TABLE t (id SERIAL, name TEXT)");
+        db.Execute("INSERT INTO t (name) VALUES ('ada')");
+        db.Execute("INSERT INTO t (name) VALUES ('alan')");
+
+        var ids = db.Execute("SELECT id FROM t").Rows!.Rows.Select(r => r[0].AsInteger);
+        Assert.That(ids, Is.EqualTo(new long[] { 1, 2 }));
+    }
+
+    [Test]
+    public void Serial_GeneratesWhenValueIsExplicitNull()
+    {
+        using var db = Database.Open(_dir);
+        db.Execute("CREATE TABLE t (id SERIAL, name TEXT)");
+        db.Execute("INSERT INTO t VALUES (NULL, 'ada')");
+
+        Assert.That(db.Execute("SELECT id FROM t").Rows!.Rows[0][0], Is.EqualTo(Value.Integer(1)));
+    }
+
+    [Test]
+    public void Serial_ExplicitValueIsKeptAndAdvancesTheCounter()
+    {
+        using var db = Database.Open(_dir);
+        db.Execute("CREATE TABLE t (id SERIAL, name TEXT)");
+        db.Execute("INSERT INTO t VALUES (10, 'ada')");        // explicit
+        db.Execute("INSERT INTO t (name) VALUES ('alan')");    // generated -> must clear 10
+
+        var ids = db.Execute("SELECT id FROM t").Rows!.Rows.Select(r => r[0].AsInteger);
+        Assert.That(ids, Is.EqualTo(new long[] { 10, 11 }));
+    }
+
+    [Test]
+    public void Serial_CounterPersistsAcrossReopen()
+    {
+        using (var db = Database.Open(_dir))
+        {
+            db.Execute("CREATE TABLE t (id SERIAL, name TEXT)");
+            db.Execute("INSERT INTO t (name) VALUES ('ada')");   // id 1
+            db.Execute("INSERT INTO t (name) VALUES ('alan')");  // id 2
+        }
+
+        using var reopened = Database.Open(_dir);
+        reopened.Execute("INSERT INTO t (name) VALUES ('grace')"); // must be id 3, not 1
+
+        var grace = reopened.Execute("SELECT id, name FROM t WHERE name = 'grace'").Rows!.Rows.Single();
+        Assert.That(grace[0], Is.EqualTo(Value.Integer(3)));
+    }
+
+    [Test]
+    public void Serial_WithUnique_RejectsACollidingExplicitValue()
+    {
+        using var db = Database.Open(_dir);
+        db.Execute("CREATE TABLE t (id SERIAL UNIQUE, name TEXT)");
+        db.Execute("INSERT INTO t (name) VALUES ('ada')");  // id 1
+
+        Assert.That(() => db.Execute("INSERT INTO t VALUES (1, 'alan')"), Throws.TypeOf<OsqlException>());
+    }
+
+    [Test]
     public void CreateIndex_IsParsedButNotYetExecuted()
     {
         using var db = OpenWithPeople(_dir);

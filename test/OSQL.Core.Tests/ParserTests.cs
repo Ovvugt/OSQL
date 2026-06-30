@@ -75,6 +75,26 @@ public sealed class ParserTests
     }
 
     [Test]
+    public void Parse_CreateTable_Serial_IsAnIntegerWithSerialGeneration()
+    {
+        var create = (CreateTableStatement)Sql.Parse("CREATE TABLE t (id SERIAL, name TEXT)");
+
+        Assert.That(create.Columns[0].Type, Is.EqualTo(DataType.Integer));
+        Assert.That(create.Columns[0].Generated, Is.EqualTo(ColumnGeneration.Serial));
+        Assert.That(create.Columns[1].Generated, Is.EqualTo(ColumnGeneration.None));
+    }
+
+    [Test]
+    public void Parse_CreateTable_SerialWithConstraints()
+    {
+        var create = (CreateTableStatement)Sql.Parse("CREATE TABLE t (id SERIAL UNIQUE NOT NULL)");
+
+        Assert.That(create.Columns[0].Generated, Is.EqualTo(ColumnGeneration.Serial));
+        Assert.That(create.Columns[0].Unique, Is.True);
+        Assert.That(create.Columns[0].NotNull, Is.True);
+    }
+
+    [Test]
     public void Parse_Insert_NullLiteral_ProducesNullExpression()
     {
         var insert = (InsertStatement)Sql.Parse("INSERT INTO t VALUES (NULL, 'x')");
