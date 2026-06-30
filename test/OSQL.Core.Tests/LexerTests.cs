@@ -43,10 +43,11 @@ public sealed class LexerTests
     }
 
     [Test]
-    public void Tokenize_NotAndNull_AreKeywords()
+    public void Tokenize_NotNullAndUnique_AreKeywords()
     {
         Assert.That(TypesOf("NOT")[0], Is.EqualTo(TokenType.Not));
         Assert.That(TypesOf("null")[0], Is.EqualTo(TokenType.Null));
+        Assert.That(TypesOf("Unique")[0], Is.EqualTo(TokenType.Unique));
     }
 
     [Test]

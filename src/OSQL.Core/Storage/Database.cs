@@ -106,8 +106,9 @@ public sealed class Database : IDisposable
     private ExecutionResult ExecuteInsert(InsertStatement statement)
     {
         var table = _catalog.Get(statement.TableName);
-        var row = BuildRow(table.Schema, statement);
-        table.Heap.Insert(row); // buffered; reaches disk on flush (Dispose) or eviction
+        var row = BuildRow(table.Schema, statement); // also enforces NOT NULL
+        EnforceUnique(table, row);                    // table scan for now; an index probe later
+        table.Heap.Insert(row);                       // buffered; reaches disk on flush or eviction
         return ExecutionResult.Status($"1 row inserted into '{table.Name}'.");
     }
 
@@ -170,6 +171,40 @@ public sealed class Database : IDisposable
             {
                 throw new OsqlException(
                     $"Column '{schema.Columns[i].Name}' is declared NOT NULL but the value is NULL.");
+            }
+        }
+    }
+
+    // Reject a row that would duplicate a non-NULL value in a UNIQUE column. NULLs never
+    // conflict (SQL treats them as distinct), so they are skipped. This is a full table
+    // scan today; once an index exists on the column it becomes a single index probe.
+    private static void EnforceUnique(Table table, Value[] row)
+    {
+        var columns = table.Schema.Columns;
+
+        var checks = new List<(int Index, Value Value)>();
+        for (var i = 0; i < columns.Count; i++)
+        {
+            if (columns[i].Unique && !row[i].IsNull)
+            {
+                checks.Add((i, row[i]));
+            }
+        }
+
+        if (checks.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var (_, existing) in table.Heap.Scan())
+        {
+            foreach (var (index, value) in checks)
+            {
+                if (existing[index] == value)
+                {
+                    throw new OsqlException(
+                        $"Duplicate value {value} for UNIQUE column '{columns[index].Name}'.");
+                }
             }
         }
     }

@@ -53,6 +53,28 @@ public sealed class ParserTests
     }
 
     [Test]
+    public void Parse_CreateTable_Unique_SetsTheFlag()
+    {
+        var create = (CreateTableStatement)Sql.Parse("CREATE TABLE t (id INTEGER UNIQUE, name TEXT)");
+
+        Assert.That(create.Columns[0].Unique, Is.True);
+        Assert.That(create.Columns[1].Unique, Is.False);
+    }
+
+    [Test]
+    public void Parse_CreateTable_NotNullAndUnique_InEitherOrder()
+    {
+        var a = (CreateTableStatement)Sql.Parse("CREATE TABLE t (id INTEGER NOT NULL UNIQUE)");
+        var b = (CreateTableStatement)Sql.Parse("CREATE TABLE t (id INTEGER UNIQUE NOT NULL)");
+
+        foreach (var create in new[] { a, b })
+        {
+            Assert.That(create.Columns[0].NotNull, Is.True);
+            Assert.That(create.Columns[0].Unique, Is.True);
+        }
+    }
+
+    [Test]
     public void Parse_Insert_NullLiteral_ProducesNullExpression()
     {
         var insert = (InsertStatement)Sql.Parse("INSERT INTO t VALUES (NULL, 'x')");

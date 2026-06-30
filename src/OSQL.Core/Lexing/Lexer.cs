@@ -25,6 +25,7 @@ public sealed class Lexer(string source)
             ["ON"] = TokenType.On,
             ["NOT"] = TokenType.Not,
             ["NULL"] = TokenType.Null,
+            ["UNIQUE"] = TokenType.Unique,
             ["INTEGER"] = TokenType.Integer,
             ["TEXT"] = TokenType.Text,
         };

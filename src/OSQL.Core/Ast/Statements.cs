@@ -11,10 +11,14 @@ public enum DataType
 }
 
 /// <summary>
-/// A column declaration inside a CREATE TABLE statement. <see cref="NotNull"/> is true
-/// when the column was declared <c>NOT NULL</c>, which forbids storing a NULL in it.
+/// A column declaration inside a CREATE TABLE statement. <see cref="NotNull"/> forbids
+/// storing a NULL; <see cref="Unique"/> forbids two rows sharing the same non-NULL value.
 /// </summary>
-public sealed record ColumnDefinition(string Name, DataType Type, bool NotNull = false);
+public sealed record ColumnDefinition(
+    string Name,
+    DataType Type,
+    bool NotNull = false,
+    bool Unique = false);
 
 /// <summary><c>CREATE TABLE name (col TYPE, ...)</c></summary>
 public sealed record CreateTableStatement(

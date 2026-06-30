@@ -62,8 +62,8 @@ public sealed class Parser(IReadOnlyList<Token> tokens)
         {
             var name = Expect(TokenType.Identifier, "a column name").Text;
             var type = ParseDataType();
-            var notNull = ParseOptionalNullability();
-            columns.Add(new ColumnDefinition(name, type, notNull));
+            var (notNull, unique) = ParseColumnConstraints();
+            columns.Add(new ColumnDefinition(name, type, notNull, unique));
         }
         while (Match(TokenType.Comma));
 
@@ -86,18 +86,33 @@ public sealed class Parser(IReadOnlyList<Token> tokens)
         throw Error("a column type (INTEGER or TEXT)");
     }
 
-    // An optional nullability clause after a column's type: 'NOT NULL' makes the column
-    // required; a bare type or an explicit 'NULL' leaves it nullable (the default).
-    private bool ParseOptionalNullability()
+    // The optional column constraints after a type: NOT NULL, an explicit (no-op) NULL,
+    // and UNIQUE, in any order. Stops at the first token that isn't a constraint.
+    private (bool NotNull, bool Unique) ParseColumnConstraints()
     {
-        if (Match(TokenType.Not))
-        {
-            Expect(TokenType.Null, "NULL after NOT");
-            return true;
-        }
+        var notNull = false;
+        var unique = false;
 
-        Match(TokenType.Null); // explicit NULL just restates the default
-        return false;
+        while (true)
+        {
+            if (Match(TokenType.Not))
+            {
+                Expect(TokenType.Null, "NULL after NOT");
+                notNull = true;
+            }
+            else if (Match(TokenType.Null))
+            {
+                // An explicit NULL just restates the default (nullable).
+            }
+            else if (Match(TokenType.Unique))
+            {
+                unique = true;
+            }
+            else
+            {
+                return (notNull, unique);
+            }
+        }
     }
 
     private CreateIndexStatement ParseCreateIndexBody()

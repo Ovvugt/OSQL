@@ -188,6 +188,61 @@ public sealed class DatabaseExecutionTests
     }
 
     [Test]
+    public void Unique_RejectsADuplicateValue()
+    {
+        using var db = Database.Open(_dir);
+        db.Execute("CREATE TABLE t (id INTEGER UNIQUE, name TEXT)");
+        db.Execute("INSERT INTO t VALUES (1, 'ada')");
+
+        Assert.That(() => db.Execute("INSERT INTO t VALUES (1, 'alan')"), Throws.TypeOf<OsqlException>());
+    }
+
+    [Test]
+    public void Unique_AllowsDistinctValues()
+    {
+        using var db = Database.Open(_dir);
+        db.Execute("CREATE TABLE t (id INTEGER UNIQUE, name TEXT)");
+        db.Execute("INSERT INTO t VALUES (1, 'ada')");
+        db.Execute("INSERT INTO t VALUES (2, 'alan')");
+
+        Assert.That(db.Execute("SELECT * FROM t").Rows!.Rows, Has.Count.EqualTo(2));
+    }
+
+    [Test]
+    public void Unique_AllowsMultipleNulls()
+    {
+        using var db = Database.Open(_dir);
+        db.Execute("CREATE TABLE t (id INTEGER UNIQUE, name TEXT)");
+
+        // NULLs are treated as distinct, so a UNIQUE column may hold many of them.
+        db.Execute("INSERT INTO t VALUES (NULL, 'ada')");
+        Assert.That(() => db.Execute("INSERT INTO t VALUES (NULL, 'alan')"), Throws.Nothing);
+    }
+
+    [Test]
+    public void Unique_AppliesToText()
+    {
+        using var db = Database.Open(_dir);
+        db.Execute("CREATE TABLE t (id INTEGER, name TEXT UNIQUE)");
+        db.Execute("INSERT INTO t VALUES (1, 'ada')");
+
+        Assert.That(() => db.Execute("INSERT INTO t VALUES (2, 'ada')"), Throws.TypeOf<OsqlException>());
+    }
+
+    [Test]
+    public void Unique_SurvivesAReopen()
+    {
+        using (var db = Database.Open(_dir))
+        {
+            db.Execute("CREATE TABLE t (id INTEGER UNIQUE)");
+            db.Execute("INSERT INTO t VALUES (1)");
+        }
+
+        using var reopened = Database.Open(_dir);
+        Assert.That(() => reopened.Execute("INSERT INTO t VALUES (1)"), Throws.TypeOf<OsqlException>());
+    }
+
+    [Test]
     public void CreateIndex_IsParsedButNotYetExecuted()
     {
         using var db = OpenWithPeople(_dir);

@@ -21,6 +21,7 @@ public enum TokenType
     On,
     Not,
     Null,
+    Unique,
 
     // Type keywords
     Integer,
