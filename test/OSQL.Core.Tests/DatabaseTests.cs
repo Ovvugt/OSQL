@@ -72,19 +72,6 @@ public sealed class DatabaseTests
     }
 
     [Test]
-    public void NonCreateStatement_ParsesButIsNotStored()
-    {
-        using (var db = Database.Open(_dir))
-        {
-            var reply = db.Execute("INSERT INTO t VALUES (1)");
-            Assert.That(reply, Does.Contain("later milestone"));
-        }
-
-        using var reopened = Database.Open(_dir);
-        Assert.That(reopened.Tables, Is.Empty);
-    }
-
-    [Test]
     public void Open_WithIncompatibleFormatMarker_Throws()
     {
         Directory.CreateDirectory(_dir);

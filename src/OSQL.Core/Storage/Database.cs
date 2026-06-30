@@ -3,59 +3,61 @@ using OSQL.Core.Ast;
 namespace OSQL.Core.Storage;
 
 /// <summary>
-/// The running database: the in-memory <see cref="Catalog"/>, the append-only
-/// <see cref="CommandLog"/> beneath it, and the single global writer lock that
-/// serializes all mutations into one honest, serializable order.
+/// The running database. It owns the shared <see cref="BufferPool"/>, the per-table heap
+/// files, the DDL <see cref="CommandLog"/>, and the single global writer lock that
+/// serializes every statement.
 ///
-/// Two paths share the same mutations:
-/// <list type="bullet">
-/// <item><b>Live</b> — <see cref="Execute"/>: parse, validate, append + fsync, then apply
-/// to memory. Validation happens before the append so an invalid statement is never
-/// written, and the write is made durable before the change is acknowledged.</item>
-/// <item><b>Replay</b> — on <see cref="Open"/>: fold each logged statement back into the
-/// catalog. No locking (single-threaded) and no re-logging.</item>
-/// </list>
+/// DDL (CREATE TABLE) is durable through the log and replayed on open. Rows go to on-disk
+/// heap files, not the log, and are read back through the buffer pool — so a table larger
+/// than the pool incurs real disk I/O. INSERTs are buffered and flushed on a clean shutdown
+/// (see <see cref="Dispose"/>); crash-safety for rows arrives with the write-ahead log in
+/// the transactions milestone.
 /// </summary>
 public sealed class Database : IDisposable
 {
-    private readonly Catalog _catalog = new();
+    private const int BufferPoolFrames = 128;
+
+    private readonly string _dataDirectory;
+    private readonly BufferPool _pool;
     private readonly CommandLog _log;
+    private readonly Catalog _catalog = new();
     private readonly object _writeLock = new();
+    private int _nextTableId = 1;
 
-    private Database(CommandLog log) => _log = log;
+    private Database(string dataDirectory, BufferPool pool, CommandLog log)
+    {
+        _dataDirectory = dataDirectory;
+        _pool = pool;
+        _log = log;
+    }
 
-    /// <summary>
-    /// Open the database rooted at <paramref name="dataDirectory"/>, creating it on first
-    /// run, verifying its storage format, and replaying the log to rebuild state.
-    /// </summary>
+    /// <summary>Open the database, creating and format-checking the directory and replaying the DDL log.</summary>
     public static Database Open(string dataDirectory)
     {
         Directory.CreateDirectory(dataDirectory);
         EnsureCompatibleFormat(dataDirectory);
 
+        var pool = new BufferPool(BufferPoolFrames);
         var log = CommandLog.Open(Path.Combine(dataDirectory, StorageFormat.LogFileName));
-        var database = new Database(log);
+        var database = new Database(dataDirectory, pool, log);
         database.Replay();
         return database;
     }
 
-    /// <summary>Snapshot of the tables that currently exist.</summary>
+    /// <summary>Snapshot of the schemas of the tables that currently exist.</summary>
     public IReadOnlyCollection<TableSchema> Tables
     {
         get
         {
             lock (_writeLock)
             {
-                return _catalog.Tables.ToList();
+                return _catalog.Tables.Select(t => t.Schema).ToList();
             }
         }
     }
 
-    /// <summary>
-    /// Run one statement as an implicit transaction and return a human-readable result.
-    /// Throws <see cref="OsqlException"/> for anything the client did wrong.
-    /// </summary>
-    public string Execute(string sql)
+    /// <summary>Run one statement as an implicit transaction. Throws <see cref="OsqlException"/> on user errors.</summary>
+    public ExecutionResult Execute(string sql)
     {
         var statement = Sql.Parse(sql);
 
@@ -64,27 +66,199 @@ public sealed class Database : IDisposable
             return statement switch
             {
                 CreateTableStatement create => ExecuteCreateTable(create, sql),
-                _ => $"Parsed {DescribeKind(statement)}; execution arrives in a later milestone "
-                     + "(nothing was stored).",
+                InsertStatement insert => ExecuteInsert(insert),
+                SelectStatement select => ExecuteSelect(select),
+                _ => ExecutionResult.Status(
+                    $"Parsed {DescribeKind(statement)}; execution arrives in a later milestone."),
             };
         }
     }
 
-    private string ExecuteCreateTable(CreateTableStatement statement, string sql)
+    // ---- CREATE TABLE ----
+
+    private ExecutionResult ExecuteCreateTable(CreateTableStatement statement, string sql)
     {
         var schema = BuildSchema(statement); // rejects duplicate columns
 
-        // Validate before we write: an invalid statement must never reach the log.
         if (_catalog.Contains(schema.Name))
         {
             throw new OsqlException($"Table '{schema.Name}' already exists.");
         }
 
-        _log.Append(sql);     // durable before visible
-        _catalog.Add(schema); // already validated, so this cannot fail
+        _log.Append(sql);      // DDL is durable in the log; validated above so it is safe to log
+        RegisterTable(schema); // create the heap file and register the table
 
-        return $"Table '{schema.Name}' created with {schema.Columns.Count} column(s).";
+        return ExecutionResult.Status($"Table '{schema.Name}' created with {schema.Columns.Count} column(s).");
     }
+
+    private Table RegisterTable(TableSchema schema)
+    {
+        var id = _nextTableId++;
+        var heapPath = Path.Combine(_dataDirectory, $"{id}.heap");
+        var heap = HeapFile.Open(heapPath, _pool, new RowFormat(schema));
+        var table = new Table(id, schema, heap);
+        _catalog.Add(table);
+        return table;
+    }
+
+    // ---- INSERT ----
+
+    private ExecutionResult ExecuteInsert(InsertStatement statement)
+    {
+        var table = _catalog.Get(statement.TableName);
+        var row = BuildRow(table.Schema, statement);
+        table.Heap.Insert(row); // buffered; reaches disk on flush (Dispose) or eviction
+        return ExecutionResult.Status($"1 row inserted into '{table.Name}'.");
+    }
+
+    private static Value[] BuildRow(TableSchema schema, InsertStatement statement)
+    {
+        var columns = schema.Columns;
+        var values = new Value[columns.Count];
+
+        if (statement.Columns is null)
+        {
+            // Positional: every column, in order.
+            if (statement.Values.Count != columns.Count)
+            {
+                throw new OsqlException(
+                    $"Table '{schema.Name}' has {columns.Count} column(s) but {statement.Values.Count} value(s) were given.");
+            }
+
+            for (var i = 0; i < columns.Count; i++)
+            {
+                values[i] = LiteralToValue(statement.Values[i]);
+            }
+
+            return values;
+        }
+
+        // Named columns: the rest default to NULL.
+        if (statement.Columns.Count != statement.Values.Count)
+        {
+            throw new OsqlException(
+                $"{statement.Columns.Count} column(s) named but {statement.Values.Count} value(s) given.");
+        }
+
+        for (var i = 0; i < values.Length; i++)
+        {
+            values[i] = Value.Null;
+        }
+
+        var assigned = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (var k = 0; k < statement.Columns.Count; k++)
+        {
+            var name = statement.Columns[k];
+            if (!assigned.Add(name))
+            {
+                throw new OsqlException($"Column '{name}' specified more than once.");
+            }
+
+            values[IndexOfColumn(schema, name)] = LiteralToValue(statement.Values[k]);
+        }
+
+        return values;
+    }
+
+    // ---- SELECT ----
+
+    private ExecutionResult ExecuteSelect(SelectStatement statement)
+    {
+        var table = _catalog.Get(statement.TableName);
+        var schema = table.Schema;
+
+        int[] projection;
+        string[] names;
+        if (statement.IsStar)
+        {
+            projection = Enumerable.Range(0, schema.Columns.Count).ToArray();
+            names = schema.Columns.Select(c => c.Name).ToArray();
+        }
+        else
+        {
+            projection = statement.Columns.Select(c => IndexOfColumn(schema, c)).ToArray();
+            names = statement.Columns.ToArray();
+        }
+
+        var rows = new List<IReadOnlyList<Value>>();
+        foreach (var (_, row) in table.Heap.Scan()) // seq scan through the buffer pool
+        {
+            if (!Matches(statement.Where, schema, row))
+            {
+                continue; // filter
+            }
+
+            var projected = new Value[projection.Length];
+            for (var i = 0; i < projection.Length; i++)
+            {
+                projected[i] = row[projection[i]]; // project
+            }
+
+            rows.Add(projected);
+        }
+
+        return ExecutionResult.Query(new ResultSet(names, rows));
+    }
+
+    private static bool Matches(Expression? where, TableSchema schema, Value[] row)
+    {
+        if (where is null)
+        {
+            return true;
+        }
+
+        if (where is not BinaryExpression binary)
+        {
+            throw new OsqlException("Unsupported WHERE expression.");
+        }
+
+        var left = Evaluate(binary.Left, schema, row);
+        var right = Evaluate(binary.Right, schema, row);
+        return Compare(left, binary.Operator, right);
+    }
+
+    private static Value Evaluate(Expression expression, TableSchema schema, Value[] row) => expression switch
+    {
+        ColumnExpression column => row[IndexOfColumn(schema, column.Name)],
+        LiteralExpression literal => LiteralToValue(literal),
+        _ => throw new OsqlException("Unsupported expression in WHERE."),
+    };
+
+    private static bool Compare(Value left, ComparisonOperator op, Value right)
+    {
+        // SQL: a comparison involving NULL is never true.
+        if (left.IsNull || right.IsNull)
+        {
+            return false;
+        }
+
+        int order;
+        if (left.Type == DataType.Integer && right.Type == DataType.Integer)
+        {
+            order = left.AsInteger.CompareTo(right.AsInteger);
+        }
+        else if (left.Type == DataType.Text && right.Type == DataType.Text)
+        {
+            order = string.CompareOrdinal(left.AsText, right.AsText);
+        }
+        else
+        {
+            throw new OsqlException($"Cannot compare {left.Type} with {right.Type}.");
+        }
+
+        return op switch
+        {
+            ComparisonOperator.Equal => order == 0,
+            ComparisonOperator.NotEqual => order != 0,
+            ComparisonOperator.Less => order < 0,
+            ComparisonOperator.LessEqual => order <= 0,
+            ComparisonOperator.Greater => order > 0,
+            ComparisonOperator.GreaterEqual => order >= 0,
+            _ => throw new OsqlException($"Unsupported operator {op}."),
+        };
+    }
+
+    // ---- recovery + shared helpers ----
 
     private void Replay()
     {
@@ -94,22 +268,38 @@ public sealed class Database : IDisposable
             {
                 if (Sql.Parse(sql) is CreateTableStatement create)
                 {
-                    _catalog.Add(BuildSchema(create));
+                    RegisterTable(BuildSchema(create));
                 }
                 else
                 {
-                    // Only CREATE TABLE is durable in this format, so nothing else
-                    // should ever be in the log.
-                    throw new OsqlException($"unexpected {DescribeKind(Sql.Parse(sql))} in the log");
+                    throw new OsqlException($"unexpected {DescribeKind(Sql.Parse(sql))} in the DDL log");
                 }
             }
             catch (OsqlException ex)
             {
-                // The bytes passed their checksum but no longer form a statement we can
-                // apply — treat that as corruption rather than guessing.
                 throw new LogCorruptionException($"Could not replay logged statement \"{sql}\": {ex.Message}");
             }
         }
+    }
+
+    private static Value LiteralToValue(Expression expression) => expression switch
+    {
+        LiteralExpression { Type: DataType.Integer } literal => Value.Integer((long)literal.Value),
+        LiteralExpression { Type: DataType.Text } literal => Value.Text((string)literal.Value),
+        _ => throw new OsqlException("Only literal values are allowed here."),
+    };
+
+    private static int IndexOfColumn(TableSchema schema, string name)
+    {
+        for (var i = 0; i < schema.Columns.Count; i++)
+        {
+            if (string.Equals(schema.Columns[i].Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                return i;
+            }
+        }
+
+        throw new OsqlException($"No such column '{name}' in table '{schema.Name}'.");
     }
 
     private static TableSchema BuildSchema(CreateTableStatement statement)
@@ -155,5 +345,13 @@ public sealed class Database : IDisposable
         _ => statement.GetType().Name,
     };
 
-    public void Dispose() => _log.Dispose();
+    public void Dispose()
+    {
+        foreach (var table in _catalog.Tables)
+        {
+            table.Dispose(); // flushes the heap's dirty pages and fsyncs
+        }
+
+        _log.Dispose();
+    }
 }
