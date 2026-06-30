@@ -62,7 +62,8 @@ public sealed class Parser(IReadOnlyList<Token> tokens)
         {
             var name = Expect(TokenType.Identifier, "a column name").Text;
             var type = ParseDataType();
-            columns.Add(new ColumnDefinition(name, type));
+            var notNull = ParseOptionalNullability();
+            columns.Add(new ColumnDefinition(name, type, notNull));
         }
         while (Match(TokenType.Comma));
 
@@ -83,6 +84,20 @@ public sealed class Parser(IReadOnlyList<Token> tokens)
         }
 
         throw Error("a column type (INTEGER or TEXT)");
+    }
+
+    // An optional nullability clause after a column's type: 'NOT NULL' makes the column
+    // required; a bare type or an explicit 'NULL' leaves it nullable (the default).
+    private bool ParseOptionalNullability()
+    {
+        if (Match(TokenType.Not))
+        {
+            Expect(TokenType.Null, "NULL after NOT");
+            return true;
+        }
+
+        Match(TokenType.Null); // explicit NULL just restates the default
+        return false;
     }
 
     private CreateIndexStatement ParseCreateIndexBody()
@@ -210,6 +225,11 @@ public sealed class Parser(IReadOnlyList<Token> tokens)
         if (Check(TokenType.StringLiteral))
         {
             return new LiteralExpression(Advance().Text, DataType.Text);
+        }
+
+        if (Match(TokenType.Null))
+        {
+            return new NullLiteralExpression();
         }
 
         throw Error("a literal value");

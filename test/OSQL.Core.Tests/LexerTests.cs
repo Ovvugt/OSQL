@@ -43,6 +43,13 @@ public sealed class LexerTests
     }
 
     [Test]
+    public void Tokenize_NotAndNull_AreKeywords()
+    {
+        Assert.That(TypesOf("NOT")[0], Is.EqualTo(TokenType.Not));
+        Assert.That(TypesOf("null")[0], Is.EqualTo(TokenType.Null));
+    }
+
+    [Test]
     public void Tokenize_Identifier_PreservesOriginalCase()
     {
         var token = Tokenize("MyTable")[0];

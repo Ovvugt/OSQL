@@ -29,6 +29,38 @@ public sealed class ParserTests
         Assert.That(() => Sql.Parse("CREATE TABLE t (id FLOAT)"), Throws.TypeOf<SqlSyntaxException>());
     }
 
+    [Test]
+    public void Parse_CreateTable_NotNull_SetsTheFlag()
+    {
+        var create = (CreateTableStatement)Sql.Parse("CREATE TABLE t (id INTEGER NOT NULL, name TEXT)");
+
+        Assert.That(create.Columns[0].NotNull, Is.True);
+        Assert.That(create.Columns[1].NotNull, Is.False);
+    }
+
+    [Test]
+    public void Parse_CreateTable_ExplicitNull_IsNullable()
+    {
+        var create = (CreateTableStatement)Sql.Parse("CREATE TABLE t (id INTEGER NULL)");
+
+        Assert.That(create.Columns[0].NotNull, Is.False);
+    }
+
+    [Test]
+    public void Parse_CreateTable_NotWithoutNull_Throws()
+    {
+        Assert.That(() => Sql.Parse("CREATE TABLE t (id INTEGER NOT)"), Throws.TypeOf<SqlSyntaxException>());
+    }
+
+    [Test]
+    public void Parse_Insert_NullLiteral_ProducesNullExpression()
+    {
+        var insert = (InsertStatement)Sql.Parse("INSERT INTO t VALUES (NULL, 'x')");
+
+        Assert.That(insert.Values[0], Is.TypeOf<NullLiteralExpression>());
+        Assert.That(insert.Values[1], Is.EqualTo(new LiteralExpression("x", DataType.Text)));
+    }
+
     // ---- INSERT ----
 
     [Test]

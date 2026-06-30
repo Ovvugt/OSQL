@@ -130,6 +130,7 @@ public sealed class Database : IDisposable
                 values[i] = LiteralToValue(statement.Values[i]);
             }
 
+            EnforceNotNull(schema, values);
             return values;
         }
 
@@ -157,7 +158,20 @@ public sealed class Database : IDisposable
             values[IndexOfColumn(schema, name)] = LiteralToValue(statement.Values[k]);
         }
 
+        EnforceNotNull(schema, values);
         return values;
+    }
+
+    private static void EnforceNotNull(TableSchema schema, Value[] values)
+    {
+        for (var i = 0; i < schema.Columns.Count; i++)
+        {
+            if (schema.Columns[i].NotNull && values[i].IsNull)
+            {
+                throw new OsqlException(
+                    $"Column '{schema.Columns[i].Name}' is declared NOT NULL but the value is NULL.");
+            }
+        }
     }
 
     // ---- SELECT ----
@@ -220,7 +234,7 @@ public sealed class Database : IDisposable
     private static Value Evaluate(Expression expression, TableSchema schema, Value[] row) => expression switch
     {
         ColumnExpression column => row[IndexOfColumn(schema, column.Name)],
-        LiteralExpression literal => LiteralToValue(literal),
+        LiteralExpression or NullLiteralExpression => LiteralToValue(expression),
         _ => throw new OsqlException("Unsupported expression in WHERE."),
     };
 
@@ -286,6 +300,7 @@ public sealed class Database : IDisposable
     {
         LiteralExpression { Type: DataType.Integer } literal => Value.Integer((long)literal.Value),
         LiteralExpression { Type: DataType.Text } literal => Value.Text((string)literal.Value),
+        NullLiteralExpression => Value.Null,
         _ => throw new OsqlException("Only literal values are allowed here."),
     };
 

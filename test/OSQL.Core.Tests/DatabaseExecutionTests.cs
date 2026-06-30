@@ -145,6 +145,49 @@ public sealed class DatabaseExecutionTests
     }
 
     [Test]
+    public void Insert_ExplicitNullIntoNullableColumn_Succeeds()
+    {
+        using var db = OpenWithPeople(_dir);
+        db.Execute("INSERT INTO people VALUES (NULL, 'ada')");
+
+        var row = db.Execute("SELECT * FROM people").Rows!.Rows[0];
+        Assert.That(row[0].IsNull, Is.True);
+        Assert.That(row[1], Is.EqualTo(Value.Text("ada")));
+    }
+
+    [Test]
+    public void Insert_ExplicitNullIntoNotNullColumn_Throws()
+    {
+        using var db = Database.Open(_dir);
+        db.Execute("CREATE TABLE t (id INTEGER NOT NULL, name TEXT)");
+
+        Assert.That(() => db.Execute("INSERT INTO t VALUES (NULL, 'ada')"), Throws.TypeOf<OsqlException>());
+    }
+
+    [Test]
+    public void Insert_OmittingNotNullColumn_Throws()
+    {
+        using var db = Database.Open(_dir);
+        db.Execute("CREATE TABLE t (id INTEGER NOT NULL, name TEXT)");
+
+        // The named-column form leaves id NULL by default, which the constraint rejects.
+        Assert.That(() => db.Execute("INSERT INTO t (name) VALUES ('ada')"), Throws.TypeOf<OsqlException>());
+    }
+
+    [Test]
+    public void NotNullConstraint_SurvivesAReopen()
+    {
+        using (var db = Database.Open(_dir))
+        {
+            db.Execute("CREATE TABLE t (id INTEGER NOT NULL)");
+        }
+
+        using var reopened = Database.Open(_dir);
+        // The constraint was rebuilt from the replayed DDL, so it still applies.
+        Assert.That(() => reopened.Execute("INSERT INTO t VALUES (NULL)"), Throws.TypeOf<OsqlException>());
+    }
+
+    [Test]
     public void CreateIndex_IsParsedButNotYetExecuted()
     {
         using var db = OpenWithPeople(_dir);

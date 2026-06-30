@@ -23,6 +23,8 @@ public sealed class Lexer(string source)
             ["FROM"] = TokenType.From,
             ["WHERE"] = TokenType.Where,
             ["ON"] = TokenType.On,
+            ["NOT"] = TokenType.Not,
+            ["NULL"] = TokenType.Null,
             ["INTEGER"] = TokenType.Integer,
             ["TEXT"] = TokenType.Text,
         };

@@ -13,6 +13,9 @@ public sealed record ColumnExpression(string Name) : Expression;
 /// </summary>
 public sealed record LiteralExpression(object Value, DataType Type) : Expression;
 
+/// <summary>The literal <c>NULL</c> — a value of no particular type.</summary>
+public sealed record NullLiteralExpression : Expression;
+
 /// <summary>A comparison such as <c>age &gt; 30</c>.</summary>
 public sealed record BinaryExpression(
     Expression Left,

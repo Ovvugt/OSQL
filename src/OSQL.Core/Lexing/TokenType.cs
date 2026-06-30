@@ -19,6 +19,8 @@ public enum TokenType
     From,
     Where,
     On,
+    Not,
+    Null,
 
     // Type keywords
     Integer,
