@@ -1,0 +1,16 @@
+<Project>
+
+  <!--
+    Shared build settings for every project in the OSQL solution.
+    Keep individual .csproj files as small as possible: anything common
+    (target framework, language settings) lives here.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+</Project>

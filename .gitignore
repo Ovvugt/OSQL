@@ -1,0 +1,18 @@
+# .NET build output
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+*.user
+
+# Rider / IDE
+.idea/
+.vs/
+*.suo
+
+# OSQL data files (the database log lives here at runtime)
+*.osql
+*.osqllog
+
+# OS
+.DS_Store
