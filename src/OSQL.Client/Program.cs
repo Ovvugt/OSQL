@@ -1,13 +1,9 @@
-using System.Text;
 using OSQL.Wire;
 
 namespace OSQL.Client;
 
 internal static class Program
 {
-    private const string ReadyPrompt = "osql=> ";
-    private const string ContinuationPrompt = "osql-> ";
-
     private static async Task Main(string[] args)
     {
         var port = args.Length > 0 && int.TryParse(args[0], out var p) ? p : WireProtocol.DefaultPort;
@@ -25,54 +21,39 @@ internal static class Program
             $"Connected to OSQL server on port {port}. " +
             "End a statement with ';'. Type \\? for help, \\q to quit.");
 
-        // Lines accumulate here until the statement is terminated with ';'.
-        var statement = new StringBuilder();
+        var editor = new StatementEditor(IsComplete);
         while (true)
         {
-            Console.Write(statement.Length == 0 ? ReadyPrompt : ContinuationPrompt);
-
-            var read = ReadCommand();
+            var read = editor.ReadStatement();
             if (read.Result == LineResult.Quit)
             {
-                Console.WriteLine();
                 break;
             }
 
             if (read.Result == LineResult.Cancel)
             {
-                Console.WriteLine();
-                statement.Clear();
-                continue;
+                continue; // statement abandoned; the editor already moved on
             }
 
-            // Meta-commands are only recognised at the start of a statement, so a
-            // word like 'exit' inside a multi-line statement isn't hijacked.
-            if (statement.Length == 0)
-            {
-                var meta = MetaCommands.TryExecute(read.Text);
-                if (meta == MetaCommandResult.Quit)
-                {
-                    break;
-                }
-
-                if (meta == MetaCommandResult.Handled)
-                {
-                    continue;
-                }
-            }
-
-            statement.AppendLine(read.Text);
-
-            // The statement is complete once its text ends with the ';' terminator.
-            var text = statement.ToString().TrimEnd();
-            if (!text.EndsWith(';'))
+            var input = read.Text.Trim();
+            if (input.Length == 0)
             {
                 continue;
             }
 
-            statement.Clear();
+            // Client meta-commands (\q, \?, exit, quit) are handled locally.
+            var meta = MetaCommands.TryExecute(input);
+            if (meta == MetaCommandResult.Quit)
+            {
+                break;
+            }
 
-            var command = text[..^1].Trim(); // drop the ';' terminator
+            if (meta == MetaCommandResult.Handled)
+            {
+                continue;
+            }
+
+            var command = input.EndsWith(';') ? input[..^1].Trim() : input;
             if (command.Length == 0)
             {
                 continue;
@@ -92,61 +73,17 @@ internal static class Program
     }
 
     /// <summary>
-    /// Read one line of input. On an interactive console we read key by key so we
-    /// can catch Ctrl+D (quit) and Ctrl+C (cancel the statement). When input is
-    /// redirected (e.g. a test pipe) we fall back to <see cref="Console.ReadLine"/>,
-    /// where end-of-input maps to quit.
+    /// Decide whether Enter (at the end of input) submits the buffer or inserts a
+    /// new line. We submit on an empty buffer (ignored upstream), a ';'-terminated
+    /// statement, or a client meta-command; otherwise Enter continues onto a new line.
     /// </summary>
-    private static ConsoleLine ReadCommand()
+    private static bool IsComplete(string text)
     {
-        if (Console.IsInputRedirected)
-        {
-            var piped = Console.ReadLine();
-            return piped is null ? ConsoleLine.Quit : ConsoleLine.FromText(piped);
-        }
-
-        var buffer = new StringBuilder();
-        while (true)
-        {
-            var key = Console.ReadKey(intercept: true);
-
-            if (key.Modifiers.HasFlag(ConsoleModifiers.Control))
-            {
-                if (key.Key == ConsoleKey.D)
-                {
-                    return ConsoleLine.Quit;
-                }
-
-                if (key.Key == ConsoleKey.C)
-                {
-                    return ConsoleLine.Cancel;
-                }
-            }
-
-            switch (key.Key)
-            {
-                case ConsoleKey.Enter:
-                    Console.WriteLine();
-                    return ConsoleLine.FromText(buffer.ToString());
-
-                case ConsoleKey.Backspace:
-                    if (buffer.Length > 0)
-                    {
-                        buffer.Length--;
-                        Console.Write("\b \b"); // erase the last character on screen
-                    }
-
-                    break;
-
-                default:
-                    if (!char.IsControl(key.KeyChar))
-                    {
-                        buffer.Append(key.KeyChar);
-                        Console.Write(key.KeyChar);
-                    }
-
-                    break;
-            }
-        }
+        var trimmed = text.Trim();
+        return trimmed.Length == 0
+            || trimmed.EndsWith(';')
+            || trimmed.StartsWith('\\')
+            || trimmed.Equals("exit", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Equals("quit", StringComparison.OrdinalIgnoreCase);
     }
 }
