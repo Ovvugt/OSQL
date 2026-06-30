@@ -9,6 +9,7 @@
     <File Path="docs/wire-protocol.md" />
   </Folder>
   <Folder Name="/1. Core/">
+    <Project Path="src/OSQL.Core/OSQL.Core.csproj" />
     <Project Path="src/OSQL.Wire/OSQL.Wire.csproj" />
   </Folder>
   <Folder Name="/2. Server/">
