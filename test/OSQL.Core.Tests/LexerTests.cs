@@ -87,6 +87,37 @@ public sealed class LexerTests
     }
 
     [Test]
+    public void Tokenize_DoubleQuoted_IsAnIdentifierNotAString()
+    {
+        var token = Tokenize("\"users\"")[0];
+
+        Assert.That(token.Type, Is.EqualTo(TokenType.Identifier));
+        Assert.That(token.Text, Is.EqualTo("users"));
+    }
+
+    [Test]
+    public void Tokenize_DoubleQuoted_MayHoldAKeywordOrSpaces()
+    {
+        // Quoting is exactly how you name a table "select" or "My Table".
+        Assert.That(Tokenize("\"select\"")[0].Type, Is.EqualTo(TokenType.Identifier));
+        Assert.That(Tokenize("\"My Table\"")[0].Text, Is.EqualTo("My Table"));
+    }
+
+    [Test]
+    public void Tokenize_DoubleQuoted_UnescapesDoubledQuotes()
+    {
+        var token = Tokenize("\"a\"\"b\"")[0];
+
+        Assert.That(token.Text, Is.EqualTo("a\"b"));
+    }
+
+    [Test]
+    public void Tokenize_UnterminatedQuotedIdentifier_Throws()
+    {
+        Assert.That(() => Tokenize("\"oops"), Throws.TypeOf<SqlSyntaxException>());
+    }
+
+    [Test]
     public void Tokenize_Position_PointsAtStartOfToken()
     {
         // "name" begins at index 7 in "SELECT name".

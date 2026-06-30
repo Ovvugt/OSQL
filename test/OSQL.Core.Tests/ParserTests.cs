@@ -138,4 +138,29 @@ public sealed class ParserTests
     {
         Assert.That(() => Sql.Parse("SELECT * FROM"), Throws.TypeOf<SqlSyntaxException>());
     }
+
+    [Test]
+    public void Parse_DoubleQuotedTableName_IsAccepted()
+    {
+        var select = (SelectStatement)Sql.Parse("SELECT * FROM \"test\"");
+
+        Assert.That(select.TableName, Is.EqualTo("test"));
+    }
+
+    [Test]
+    public void Parse_DoubleQuotedKeyword_IsUsableAsAName()
+    {
+        var select = (SelectStatement)Sql.Parse("SELECT * FROM \"select\"");
+
+        Assert.That(select.TableName, Is.EqualTo("select"));
+    }
+
+    [Test]
+    public void Parse_SingleQuotedTableName_IsRejectedAsAString()
+    {
+        // 'test' is a string value, never a name — the error should say so.
+        var ex = Assert.Throws<SqlSyntaxException>(() => Sql.Parse("SELECT * FROM 'test'"));
+
+        Assert.That(ex!.Message, Does.Contain("string 'test'"));
+    }
 }

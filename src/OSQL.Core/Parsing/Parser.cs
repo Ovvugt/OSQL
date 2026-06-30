@@ -227,7 +227,7 @@ public sealed class Parser(IReadOnlyList<Token> tokens)
             TokenType.Greater => ComparisonOperator.Greater,
             TokenType.GreaterEqual => ComparisonOperator.GreaterEqual,
             _ => throw new SqlSyntaxException(
-                $"Expected a comparison operator but found '{token.Text}' at position {token.Position}."),
+                $"Expected a comparison operator but found {Describe(token)} at position {token.Position}."),
         };
     }
 
@@ -287,7 +287,18 @@ public sealed class Parser(IReadOnlyList<Token> tokens)
     private SqlSyntaxException Error(string expected)
     {
         var token = Current;
-        var found = token.Type == TokenType.EndOfFile ? "end of input" : $"'{token.Text}'";
-        return new SqlSyntaxException($"Expected {expected} but found {found} at position {token.Position}.");
+        return new SqlSyntaxException($"Expected {expected} but found {Describe(token)} at position {token.Position}.");
     }
+
+    /// <summary>
+    /// Render a token for an error message, naming its kind so a quoted value isn't mistaken
+    /// for a bare word: a string literal reads as <c>string 'x'</c>, a number as <c>number 5</c>.
+    /// </summary>
+    private static string Describe(Token token) => token.Type switch
+    {
+        TokenType.EndOfFile => "end of input",
+        TokenType.StringLiteral => $"string '{token.Text}'",
+        TokenType.NumberLiteral => $"number {token.Text}",
+        _ => $"'{token.Text}'",
+    };
 }

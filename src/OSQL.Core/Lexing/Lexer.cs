@@ -73,6 +73,11 @@ public sealed class Lexer(string source)
             return ReadString(start);
         }
 
+        if (c == '"')
+        {
+            return ReadQuotedIdentifier(start);
+        }
+
         return ReadOperatorOrPunctuation(start);
     }
 
@@ -106,7 +111,24 @@ public sealed class Lexer(string source)
         return new Token(TokenType.NumberLiteral, _source[start.._position], start);
     }
 
+    // A single-quoted string literal, e.g. 'ada'. The content is kept without the quotes.
     private Token ReadString(int start)
+    {
+        var text = ReadDelimited('\'', start, "string literal");
+        return new Token(TokenType.StringLiteral, text, start);
+    }
+
+    // A double-quoted (delimited) identifier, e.g. "select" or "My Table". Quoting lets a
+    // name use reserved words, spaces or punctuation; it is never matched against keywords.
+    private Token ReadQuotedIdentifier(int start)
+    {
+        var text = ReadDelimited('"', start, "quoted identifier");
+        return new Token(TokenType.Identifier, text, start);
+    }
+
+    // Read a run delimited by <quote> on both sides, where a doubled quote is an escaped
+    // quote rather than the terminator (so 'it''s' -> it's and "a""b" -> a"b).
+    private string ReadDelimited(char quote, int start, string what)
     {
         _position++; // consume the opening quote
         var value = new StringBuilder();
@@ -114,18 +136,17 @@ public sealed class Lexer(string source)
         {
             if (IsAtEnd)
             {
-                throw new SqlSyntaxException($"Unterminated string literal at position {start}.");
+                throw new SqlSyntaxException($"Unterminated {what} at position {start}.");
             }
 
             var c = _source[_position];
             _position++;
 
-            if (c == '\'')
+            if (c == quote)
             {
-                // Two single quotes in a row is an escaped quote, not the end.
-                if (!IsAtEnd && _source[_position] == '\'')
+                if (!IsAtEnd && _source[_position] == quote)
                 {
-                    value.Append('\'');
+                    value.Append(quote);
                     _position++;
                     continue;
                 }
@@ -136,7 +157,7 @@ public sealed class Lexer(string source)
             value.Append(c);
         }
 
-        return new Token(TokenType.StringLiteral, value.ToString(), start);
+        return value.ToString();
     }
 
     private Token ReadOperatorOrPunctuation(int start)
