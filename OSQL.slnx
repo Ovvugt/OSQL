@@ -18,4 +18,7 @@
   <Folder Name="/3. Client/">
     <Project Path="src/OSQL.Client/OSQL.Client.csproj" />
   </Folder>
+  <Folder Name="/4. Test/">
+    <Project Path="test/OSQL.Core.Tests/OSQL.Core.Tests.csproj" />
+  </Folder>
 </Solution>
