@@ -1,5 +1,20 @@
 <Solution>
-  <Project Path="OSQL.ServiceDefaults/OSQL.ServiceDefaults.csproj" />
-  <Project Path="src/OSQL.Client/OSQL.Client.csproj" />
-  <Project Path="src/OSQL.Server/OSQL.Server.csproj" />
+  <Folder Name="/0. Docs/">
+    <File Path="docs/00-overview.md" />
+    <File Path="docs/acid.md" />
+    <File Path="docs/indexing.md" />
+    <File Path="docs/logical-query-order.md" />
+    <File Path="docs/query-pipeline.md" />
+    <File Path="docs/storage-101.md" />
+    <File Path="docs/wire-protocol.md" />
+  </Folder>
+  <Folder Name="/1. Core/">
+    <Project Path="src/OSQL.Wire/OSQL.Wire.csproj" />
+  </Folder>
+  <Folder Name="/2. Server/">
+    <Project Path="src/OSQL.Server/OSQL.Server.csproj" />
+  </Folder>
+  <Folder Name="/3. Client/">
+    <Project Path="src/OSQL.Client/OSQL.Client.csproj" />
+  </Folder>
 </Solution>
